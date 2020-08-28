@@ -56,8 +56,7 @@ public class LruCache<K, V> {
         if (map.contains(key)) {
             Node<K, V> node = map.get(key);
             node.value = value;
-            removeNode(node);
-            addLatestNode(node);
+            refreshLatestNode(node);
         } else {
             if (map.size() > maxCapacity) {
                 System.out.println("Maximum capacity reached removed node " + head);
@@ -70,10 +69,14 @@ public class LruCache<K, V> {
         }
     }
 
-    public V get(K key) {
-        Node<K, V> node = map.get(key);
+    private void refreshLatestNode(Node<K, V> node) {
         removeNode(node);
         addLatestNode(node);
+    }
+
+    public V get(K key) {
+        Node<K, V> node = map.get(key);
+        refreshLatestNode(node);
         return node != null ? node.value : null;
     }
 
