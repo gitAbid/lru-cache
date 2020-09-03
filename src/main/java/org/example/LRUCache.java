@@ -1,32 +1,31 @@
 package org.example;
 
-import java.time.Instant;
-import java.util.Timer;
-import java.util.TimerTask;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.*;
 
-public class LruCache<K, V> {
+public class LRUCache<K, V> {
     private final int maxCapacity;
     private final long expiration;
+    private final TimeUnit timeUnit;
     private final ConcurrentHashMap<K, Node<K, V>> map;
-    Timer timer;
-    private boolean cacheMaintainerRunning = false;
+    private final ConcurrentHashMap<K, ScheduledFuture<?>> cacheMaintainerMap;
+    private final ScheduledExecutorService scheduledExecutorService;
+
     private Node<K, V> head, tail;
 
-    public LruCache(int initialCapacity, int maxCapacity, long expiration) {
+    public LRUCache(int initialCapacity, int maxCapacity, long expiration, TimeUnit timeUnit) {
         this.maxCapacity = maxCapacity;
+        this.expiration = expiration;
+        this.timeUnit = timeUnit;
         if (initialCapacity > maxCapacity) {
             initialCapacity = maxCapacity;
         }
-        this.expiration = expiration;
         map = new ConcurrentHashMap<>(initialCapacity);
-        timer = new Timer();
-        timer.scheduleAtFixedRate(new CacheMaintainer(), 0, 1000);
-        cacheMaintainerRunning = true;
+        cacheMaintainerMap = new ConcurrentHashMap<>(initialCapacity);
+        scheduledExecutorService = Executors.newScheduledThreadPool(1);
     }
 
-    public LruCache(int maxCapacity, int expiration) {
-        this(20, maxCapacity, expiration);
+    public LRUCache(int maxCapacity, int expiration, TimeUnit timeUnit) {
+        this(20, maxCapacity, expiration, timeUnit);
     }
 
     private void removeNode(Node<K, V> node) {
@@ -70,23 +69,35 @@ public class LruCache<K, V> {
         } else {
             if (map.size() > maxCapacity) {
                 System.out.println("Maximum capacity reached removed node " + head);
-                removeNode(head);
-                map.remove(head.key);
+                evict(head);
             }
             Node<K, V> node = new Node<>(key, value);
             map.put(key, node);
             addLatestNode(node);
+            ScheduledFuture<?> scheduledFuture = scheduledExecutorService.schedule(new CacheMaintainer(node),
+                    expiration, timeUnit);
+            cacheMaintainerMap.put(key, scheduledFuture);
         }
-        if (!cacheMaintainerRunning && !map.isEmpty()) {
-            this.timer = new Timer();
-            timer.scheduleAtFixedRate(new CacheMaintainer(), 0, 1000);
+
+    }
+
+    private void updateExpirationTime(K key) {
+        if (cacheMaintainerMap.containsKey(key)) {
+            ScheduledFuture<?> scheduledFuture = cacheMaintainerMap.get(key);
+            scheduledFuture.cancel(false);
         }
     }
 
     private void refreshLatestNode(Node<K, V> node) {
+        if (node == null) {
+            return;
+        }
         removeNode(node);
         addLatestNode(node);
-        node.lastAccessed = System.currentTimeMillis();
+        updateExpirationTime(node.key);
+        ScheduledFuture<?> scheduledFuture = scheduledExecutorService.schedule(new CacheMaintainer(node)
+                , expiration, timeUnit);
+        cacheMaintainerMap.put(node.key, scheduledFuture);
     }
 
     public V get(K key) {
@@ -104,30 +115,18 @@ public class LruCache<K, V> {
         System.out.println();
     }
 
-    private void updateCacheMaintainerStatus() {
-        if (map.isEmpty()) {
-            timer.cancel();
-            timer.purge();
-            System.out.println("No entries to clean up. Stopping maintainer");
-            cacheMaintainerRunning = false;
-        }
-    }
-
     public void evict(Node<K, V> node) {
-        long lastAccessedPeriod = System.currentTimeMillis() - node.lastAccessed;
-        if (lastAccessedPeriod > expiration) {
-            System.out.println("Maximum expiration reached evicting cache " + node);
-            removeNode(node);
-            map.remove(node.key);
-            if (head != null) {
-                evict(head);
-            }
+        removeNode(node);
+        map.remove(node.key);
+        if (cacheMaintainerMap.containsKey(node.key)) {
+            ScheduledFuture<?> scheduledFuture = cacheMaintainerMap.get(node.key);
+            scheduledFuture.cancel(false);
         }
+        cacheMaintainerMap.remove(node.key);
     }
 
     private static class Node<K, V> {
-        private long lastAccessed = System.currentTimeMillis();
-        private K key;
+        private final K key;
         private V value;
         private Node<K, V> next, prev;
 
@@ -142,15 +141,19 @@ public class LruCache<K, V> {
         }
     }
 
-    class CacheMaintainer extends TimerTask {
+    class CacheMaintainer implements Runnable {
+        final Node<K, V> node;
+
+        public CacheMaintainer(Node<K, V> node) {
+            this.node = node;
+        }
+
         @Override
         public void run() {
-            cacheMaintainerRunning = true;
-            if (head != null) {
-                evict(head);
+            if (node != null && map.containsKey(node.key)) {
+                System.out.println("Maximum expiration reached evicting cache " + node);
+                evict(node);
             }
-            updateCacheMaintainerStatus();
-            System.out.println("Running " + Instant.now());
         }
     }
 
