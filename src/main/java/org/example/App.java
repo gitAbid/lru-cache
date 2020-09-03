@@ -6,7 +6,7 @@ package org.example;
 public class App {
     public static void main(String[] args) {
         // 1. initiate the cache with capacity 10
-        LruCache<String, String> cache = new LruCache<String, String>(10);
+        LruCache<String, String> cache = new LruCache<String, String>(10, 5000);
 // 2. insert 10 objects to cache
         for (int i = 1; i <= 10; i++) {
             cache.put(String.format("key-%d", i), String.format("value-%d", i));
@@ -18,12 +18,14 @@ public class App {
         cache.get("key-1");
         System.out.println("printing cache after accessing key-1:");
         cache.printCache();
-// 5. insert new objects to cache
-        for (int i = 11; i <= 15; i++) {
-            cache.put(String.format("key-%d", i), String.format("value-%d", i));
+
+
+        try {
+            Thread.sleep(10000);
+            cache.put(String.format("key-%d", 200), String.format("value-%d", 200));
+        } catch (InterruptedException e) {
+            e.printStackTrace();
         }
-// 6. print the cache and observe that the least recently used objects are evicted
-        System.out.println("printing cache after adding new objects:");
-        cache.printCache();
+
     }
 }
