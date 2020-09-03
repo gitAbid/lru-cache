@@ -47,7 +47,7 @@ public class LRUCache<K, V> {
 
     }
 
-    private void addLatestNode(Node<K, V> node) {
+    private void addNode(Node<K, V> node) {
         if (node == null) {
             return;
         }
@@ -65,15 +65,15 @@ public class LRUCache<K, V> {
         if (map.contains(key)) {
             Node<K, V> node = map.get(key);
             node.value = value;
-            refreshLatestNode(node);
+            refreshNodes(node);
         } else {
             if (map.size() > maxCapacity) {
-                System.out.println("Maximum capacity reached removed node " + head);
-                evict(head);
+                System.out.println("Maximum capacity reached removed cache [" + head.key + "]");
+                evictNode(head);
             }
             Node<K, V> node = new Node<>(key, value);
             map.put(key, node);
-            addLatestNode(node);
+            addNode(node);
             ScheduledFuture<?> scheduledFuture = scheduledExecutorService.schedule(new CacheMaintainer(node),
                     expiration, timeUnit);
             cacheMaintainerMap.put(key, scheduledFuture);
@@ -81,20 +81,20 @@ public class LRUCache<K, V> {
 
     }
 
-    private void updateExpirationTime(K key) {
+    private void removeOlderEvictionTask(K key) {
         if (cacheMaintainerMap.containsKey(key)) {
             ScheduledFuture<?> scheduledFuture = cacheMaintainerMap.get(key);
             scheduledFuture.cancel(false);
         }
     }
 
-    private void refreshLatestNode(Node<K, V> node) {
+    private void refreshNodes(Node<K, V> node) {
         if (node == null) {
             return;
         }
         removeNode(node);
-        addLatestNode(node);
-        updateExpirationTime(node.key);
+        addNode(node);
+        removeOlderEvictionTask(node.key);
         ScheduledFuture<?> scheduledFuture = scheduledExecutorService.schedule(new CacheMaintainer(node)
                 , expiration, timeUnit);
         cacheMaintainerMap.put(node.key, scheduledFuture);
@@ -102,7 +102,7 @@ public class LRUCache<K, V> {
 
     public V get(K key) {
         Node<K, V> node = map.get(key);
-        refreshLatestNode(node);
+        refreshNodes(node);
         return node != null ? node.value : null;
     }
 
@@ -115,7 +115,7 @@ public class LRUCache<K, V> {
         System.out.println();
     }
 
-    public void evict(Node<K, V> node) {
+    public void evictNode(Node<K, V> node) {
         removeNode(node);
         map.remove(node.key);
         if (cacheMaintainerMap.containsKey(node.key)) {
@@ -151,8 +151,8 @@ public class LRUCache<K, V> {
         @Override
         public void run() {
             if (node != null && map.containsKey(node.key)) {
-                System.out.println("Maximum expiration reached evicting cache " + node);
-                evict(node);
+                System.out.println("Maximum expiration reached removing cache [" + node.key + "]");
+                evictNode(node);
             }
         }
     }
