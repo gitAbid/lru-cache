@@ -10,7 +10,7 @@ public class App {
         LoadingCache<String, String> cache = LoadingCache.builder()
                 .withMaxCapacity(10)
                 .withExpiration(5000L)
-                .withCacheLoader(null)
+                .withCacheLoader(key -> "val-" + key)
                 .build();
 // 2. insert 10 objects to cache
         for (int i = 1; i <= 10; i++) {
@@ -30,6 +30,8 @@ public class App {
 
 
         try {
+            System.out.println("printing cache after getting new element:" + cache.get("key-1000"));
+            cache.printCache();
             System.out.println("Sleeping 4000");
             Thread.sleep(4000);
             cache.get("key-12");
@@ -51,7 +53,7 @@ public class App {
             cache.printCache();
             System.out.println("Sleeping 6000");
             Thread.sleep(6000);
-            System.out.println("printing cache after final access:"+cache.get("key-100"));
+            System.out.println("printing cache after final access:" + cache.get("key-100"));
             cache.printCache();
 
         } catch (InterruptedException e) {

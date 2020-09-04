@@ -93,7 +93,14 @@ public class LoadingCache<K, V> {
         try {
             Node<K, V> node = map.get(key);
             if (node == null) {
-                return null;
+                System.out.println("No cache found with [" + key + "]. Loading cache");
+                if (cacheLoader != null) {
+                    V value = cacheLoader.loadCache(key);
+                    put(key, value);
+                    node = map.get(key);
+                } else {
+                    System.out.println("No loader found to load cache [" + key + "]");
+                }
             } else if (isNodeExpired(node)) {
                 System.out.println("Cache expired reloading cache [" + key + "]");
                 if (cacheLoader != null) {
@@ -107,7 +114,7 @@ public class LoadingCache<K, V> {
             } else {
                 refreshNodes(node);
             }
-            return node.value;
+            return node != null ? node.value : null;
         } finally {
             lock.unlock();
         }
@@ -169,7 +176,7 @@ public class LoadingCache<K, V> {
         }
     }
 
-    public static final class Builder<K, V> implements ICacheLoader<K, V>, IExpiration, IMaxCapacity, IBuild {
+    public static final class Builder<K, V> implements ICacheLoader<K, V>, IExpiration<K, V>, IMaxCapacity<K, V>, IBuild<K, V> {
         private long expiration;
         private int maxCapacity;
         private CacheLoader<K, V> cacheLoader;
