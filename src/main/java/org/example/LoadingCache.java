@@ -1,10 +1,10 @@
 package org.example;
 
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.HashMap;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class LoadingCache<K, V> {
-    private final ConcurrentHashMap<K, Node<K, V>> map;
+    private final HashMap<K, Node<K, V>> map;
     private final ReentrantLock lock = new ReentrantLock();
     private final int maxCapacity;
     private final long expiration;
@@ -16,7 +16,7 @@ public class LoadingCache<K, V> {
         maxCapacity = builder.maxCapacity;
         expiration = builder.expiration;
         cacheLoader = builder.cacheLoader;
-        map = new ConcurrentHashMap<>(maxCapacity);
+        map = new HashMap<>(maxCapacity);
     }
 
     public static IMaxCapacity builder() {
@@ -59,7 +59,7 @@ public class LoadingCache<K, V> {
     public void put(K key, V value) {
         lock.lock();
         try {
-            if (map.contains(key)) {
+            if (map.containsKey(key)) {
                 Node<K, V> node = map.get(key);
                 node.value = value;
                 refreshNodes(node);
@@ -185,7 +185,7 @@ public class LoadingCache<K, V> {
         }
 
         @Override
-        public IBuild withCacheLoader(CacheLoader<K, V> loader) {
+        public IBuild<K, V> withCacheLoader(CacheLoader<K, V> loader) {
             cacheLoader = loader;
             return this;
         }
@@ -202,7 +202,7 @@ public class LoadingCache<K, V> {
         }
 
         @Override
-        public IExpiration withMaxCapacity(Integer maxCapacity) {
+        public IExpiration<K, V> withMaxCapacity(Integer maxCapacity) {
             if (maxCapacity == null) {
                 this.maxCapacity = 20;
             } else {
