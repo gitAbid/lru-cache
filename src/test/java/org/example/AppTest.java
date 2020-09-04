@@ -11,10 +11,16 @@ import static org.junit.jupiter.api.Assertions.assertNull;
  * Unit test for simple App.
  */
 public class AppTest {
-    private LRUCache<Integer, Integer> cache;
+    private LoadingCache<Integer, Integer> cache;
 
     public AppTest() {
-        this.cache = new LRUCache<>(2, 5000, TimeUnit.MILLISECONDS);
+        this.cache = LoadingCache.builder()
+                .withMaxCapacity(2)
+                .withExpiration(5000L)
+                .withCacheLoader(key -> {
+                    return null;
+                })
+                .build();
     }
 
     @Test
@@ -76,7 +82,13 @@ public class AppTest {
 
     @Test
     public void testMultiThreadedPut() {
-        cache = new LRUCache<>(2, 5000, TimeUnit.MILLISECONDS);
+        cache = LoadingCache.builder()
+                .withMaxCapacity(2)
+                .withExpiration(5000L)
+                .withCacheLoader(key -> {
+                    return null;
+                })
+                .build();
         cache.put(1, 1);
         cache.put(2, 4);
         Thread t1 = new Thread(() -> {
