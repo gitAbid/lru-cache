@@ -67,16 +67,16 @@ public class LRUCache<K, V> {
             node.value = value;
             refreshNodes(node);
         } else {
-            if (map.size() > maxCapacity) {
-                System.out.println("Maximum capacity reached removed cache [" + head.key + "]");
-                evictNode(head);
-            }
             Node<K, V> node = new Node<>(key, value);
             map.put(key, node);
             addNode(node);
             ScheduledFuture<?> scheduledFuture = scheduledExecutorService.schedule(new CacheMaintainer(node),
                     expiration, timeUnit);
             cacheMaintainerMap.put(key, scheduledFuture);
+            if (map.size() > maxCapacity) {
+                System.out.println("Maximum capacity reached removed cache [" + head.key + "]");
+                evictNode(head);
+            }
         }
 
     }
