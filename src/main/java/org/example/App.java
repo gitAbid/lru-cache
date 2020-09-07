@@ -60,21 +60,9 @@ public class App {
             e.printStackTrace();
         }
 
+        System.out.println("printing cache after resetting cache:");
+        cache.resetCache();
+        cache.printCache();
 
-//        Integer value;
-//        cache.put(1, 1);
-//        cache.put(2, 4);
-//        cache.put(3, 9);
-//        System.out.println("After putting data");
-//        cache.printCache();
-//        value = cache.get(1);
-//        System.out.println("After getting 1 => " + value);
-//        cache.printCache();
-//        value = cache.get(2);
-//        System.out.println("After getting 2 => " + value);
-//        cache.printCache();
-//        value = cache.get(3);
-//        System.out.println("After getting 3 => " + value);
-//        cache.printCache();
     }
 }
