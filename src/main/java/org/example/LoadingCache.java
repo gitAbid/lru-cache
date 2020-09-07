@@ -64,11 +64,8 @@ public class LoadingCache<K, V> {
     }
 
     private void refreshNodes(Node<K, V> node) {
-        if (node == null) {
-            return;
-        }
         doublyLinkedList.delete(node.key);
-        node.lastAccessTime = System.currentTimeMillis();
+        node.touch();
         doublyLinkedList.addNode(node.key, node.value);
     }
 

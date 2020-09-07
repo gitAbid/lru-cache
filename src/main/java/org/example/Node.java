@@ -26,22 +26,13 @@ public class Node<K, V> {
      * @param value node data
      */
     Node(K key, V value) {
-        this(null, key, value, null, System.currentTimeMillis());
-    }
-
-    /**
-     * Constructor.
-     *
-     * @param value node data
-     * @param next  reference to next node
-     * @param prev  reference to the previous node
-     */
-    Node(Node<K, V> prev, K key, V value, Node<K, V> next, long lastAccessTime) {
         this.value = value;
         this.key = key;
-        this.next = next;
-        this.prev = prev;
-        this.lastAccessTime = lastAccessTime;
+        touch();
+    }
+
+    public void touch() {
+        this.lastAccessTime = System.currentTimeMillis();
     }
 
     @Override
