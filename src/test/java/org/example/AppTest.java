@@ -17,9 +17,7 @@ public class AppTest {
         this.cache = LoadingCache.builder()
                 .withMaxCapacity(2)
                 .withExpiration(5000L)
-                .withCacheLoader(key -> {
-                    return null;
-                })
+                .withCacheLoader(null)
                 .build();
     }
 
@@ -36,6 +34,7 @@ public class AppTest {
         cache.put(2, 4);
         assertEquals(cache.get(1), 1);
         assertEquals(cache.get(2), 4);
+        assertEquals(cache.getCacheSize(),2);
     }
 
     @Test
@@ -46,6 +45,7 @@ public class AppTest {
         assertNull(cache.get(1));
         assertEquals(cache.get(2), 4);
         assertEquals(cache.get(3), 9);
+        assertEquals(cache.getCacheSize(),2);
     }
 
     @Test
@@ -57,6 +57,7 @@ public class AppTest {
         assertEquals(cache.get(1), 1);
         assertNull(cache.get(2));
         assertEquals(cache.get(3), 9);
+        assertEquals(cache.getCacheSize(),2);
     }
 
     @Test
@@ -85,26 +86,27 @@ public class AppTest {
         cache = LoadingCache.builder()
                 .withMaxCapacity(2)
                 .withExpiration(5000L)
-                .withCacheLoader(key -> {
-                    return null;
-                })
+                .withCacheLoader(null)
                 .build();
         cache.put(1, 1);
         cache.put(2, 4);
         Thread t1 = new Thread(() -> {
             System.out.println("Thread ->[3,9] ->" + Thread.currentThread());
             cache.put(3, 9);
+            cache.printCache();
         });
 
         Thread t2 = new Thread(() -> {
             System.out.println("Thread ->[4,16] ->" + Thread.currentThread());
             cache.put(4, 16);
+            cache.printCache();
 
         });
         t2.start();
         t1.start();
         try {
             Thread.sleep(1000);
+            cache.printCache();
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
@@ -112,6 +114,7 @@ public class AppTest {
         assertNull(cache.get(2));
         assertEquals(cache.get(4), 16);
         assertEquals(cache.get(3), 9);
+        assertEquals(cache.getCacheSize(),2);
 
     }
 
@@ -135,6 +138,7 @@ public class AppTest {
             e.printStackTrace();
         }
 
+        assertEquals(cache.getCacheSize(),2);
 
     }
 

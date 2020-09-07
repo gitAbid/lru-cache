@@ -4,6 +4,9 @@ import org.apache.log4j.BasicConfigurator;
 import org.apache.log4j.Logger;
 
 import java.util.HashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class LoadingCache<K, V> {
@@ -14,22 +17,36 @@ public class LoadingCache<K, V> {
     private final long expiration;
     private final CacheLoader<K, V> cacheLoader;
     private final DoublyLinkedList<K, V> doublyLinkedList;
-
+    private final CacheStatistics cacheStatistics;
+    private final RemovalListener<K> removalListener;
 
     private LoadingCache(Builder<K, V> builder) {
         BasicConfigurator.configure();
         maxCapacity = builder.maxCapacity;
         expiration = builder.expiration;
         cacheLoader = builder.cacheLoader;
+        removalListener = builder.removalListener;
         map = new HashMap<>(maxCapacity);
         doublyLinkedList = new DoublyLinkedList<>();
-        logger.info("Loading cache initialized with [maxCapacity: -> " + maxCapacity + ", expiration: -> " + expiration + ", cacheLoader: -> " + cacheLoader + "]");
+        cacheStatistics = new CacheStatistics();
+        if (builder.periodicCacheStatsResetEnabled) {
+            ScheduledExecutorService executorService = Executors.newScheduledThreadPool(1);
+            executorService.scheduleAtFixedRate(cacheStatistics::resetStatistics, 0L, builder.periodicCacheStatsResetExpiration, TimeUnit.MILLISECONDS);
+        }
+        logger.info("LoadingCache initialized with [maxCapacity: -> " + maxCapacity + ", expiration: -> " + expiration + ", cacheLoader: -> " + cacheLoader + "]");
     }
 
-    public static IMaxCapacity builder() {
+    public static MaxCapacity builder() {
         return new Builder();
     }
 
+    public int getCacheSize() {
+        return map.size();
+    }
+
+    public CacheStatistics getCacheStatistics() {
+        return cacheStatistics;
+    }
 
     public void put(K key, V value) {
         logger.debug("PUT operation [" + key + "->" + value + "]");
@@ -44,7 +61,7 @@ public class LoadingCache<K, V> {
                 logger.debug("Adding new entry [" + key + "->" + value + "]");
                 Node<K, V> node = new Node<>(key, value);
                 map.put(key, node);
-                doublyLinkedList.addNode(node);
+                doublyLinkedList.addTail(node);
                 if (map.size() > maxCapacity) {
                     logger.info("Maximum capacity reached removing cache [" + doublyLinkedList.getHead().key + "]");
                     evictNode(doublyLinkedList.getHead());
@@ -59,44 +76,65 @@ public class LoadingCache<K, V> {
     public void resetCache() {
         logger.info("Resetting cache");
         while (doublyLinkedList.getSize() > 0) {
-            doublyLinkedList.deleteFirstNode();
+            doublyLinkedList.removeHead();
         }
+        cacheStatistics.resetStatistics();
     }
 
     private void refreshNodes(Node<K, V> node) {
-        if (node == null) {
-            return;
-        }
-        doublyLinkedList.delete(node);
-        node.lastAccessTime = System.currentTimeMillis();
-        doublyLinkedList.addNode( node);
+        doublyLinkedList.unlink(node);
+        node.touch();
+        doublyLinkedList.addTail(node);
     }
 
     public V get(K key) {
+        cacheStatistics.increaseRequestCount();
         logger.debug("GET operation [" + key + "]");
         lock.lock();
         try {
             Node<K, V> node = map.get(key);
             if (node == null) {
+                cacheStatistics.increaseMissCount();
                 logger.info("No cache found with [" + key + "]. Loading cache using loader");
                 if (cacheLoader != null) {
-                    V value = cacheLoader.loadCache(key);
+                    cacheStatistics.increaseLoadCount();
+                    V value = null;
+                    try {
+                        value = cacheLoader.loadCache(key);
+                        cacheStatistics.increaseLoadSuccessCount();
+                    } catch (Exception e) {
+                        cacheStatistics.increaseLoadFailedCount();
+                        cacheStatistics.increaseLoadExceptionCount();
+                        logger.error("Error occurred while loading cache." + e);
+                    }
                     put(key, value);
                     node = map.get(key);
                 } else {
+                    cacheStatistics.increaseLoadFailedCount();
                     logger.info("No loader found to load cache [" + key + "]");
                 }
             } else if (isNodeExpired(node)) {
+                cacheStatistics.increaseExpireCount();
                 logger.info("Cache expired reloading cache [" + key + "]");
                 if (cacheLoader != null) {
-                    node.value = cacheLoader.loadCache(key);
+                    cacheStatistics.increaseLoadCount();
+                    try {
+                        node.value = cacheLoader.loadCache(key);
+                        cacheStatistics.increaseLoadSuccessCount();
+                    } catch (Exception e) {
+                        cacheStatistics.increaseLoadFailedCount();
+                        cacheStatistics.increaseLoadExceptionCount();
+                        logger.error("Error occurred while loading cache." + e);
+                    }
                     refreshNodes(node);
                 } else {
+                    cacheStatistics.increaseLoadFailedCount();
                     logger.info("No loader found removing cache [" + key + "]");
                     evictNode(node);
                     return null;
                 }
             } else {
+                cacheStatistics.increaseHitCount();
                 refreshNodes(node);
             }
             logger.debug("Returning cache value [" + key + "-> " + node + "]");
@@ -124,51 +162,71 @@ public class LoadingCache<K, V> {
     }
 
     public void evictNode(Node<K, V> node) {
-        doublyLinkedList.delete(node);
+        doublyLinkedList.unlink(node);
         map.remove(node.key);
+        cacheStatistics.increaseEvictionCount();
+        if (removalListener != null) {
+            removalListener.onRemoval(node.key);
+        }
     }
 
     private boolean isNodeExpired(Node<K, V> node) {
-        return System.currentTimeMillis() - node.lastAccessTime > expiration;
+        return System.currentTimeMillis() - node.getLastAccessTime() > expiration;
     }
 
     interface CacheLoader<K, V> {
         V loadCache(K key);
     }
 
-    interface IBuild<K, V> {
+    interface RemovalListener<K> {
+        void onRemoval(K key);
+    }
+
+    interface Build<K, V> {
         LoadingCache<K, V> build();
+
+        Build<K, V> withRemovalListener(RemovalListener<K> removalListener);
+
+        CacheStatisticsResetExpiration<K, V> withPeriodicCacheStatsResetEnabled();
     }
 
-    interface ICacheLoader<K, V> {
-        IBuild<K, V> withCacheLoader(CacheLoader<K, V> loader);
+    interface CacheLoaderListener<K, V> {
+        Build<K, V> withCacheLoader(CacheLoader<K, V> loader);
     }
 
-    interface IExpiration<K, V> {
-        ICacheLoader<K, V> withExpiration(Long milliseconds);
+    interface CacheStatisticsResetExpiration<K, V> {
+        Build<K, V> withPeriodicCacheStatsResetExpiration(Long milliseconds);
     }
 
-    interface IMaxCapacity<K, V> {
-        IExpiration<K, V> withMaxCapacity(Integer maxCapacity);
+    interface Expiration<K, V> {
+        CacheLoaderListener<K, V> withExpiration(Long milliseconds);
+    }
+
+    interface MaxCapacity<K, V> {
+        Expiration<K, V> withMaxCapacity(Integer maxCapacity);
     }
 
 
-    public static final class Builder<K, V> implements ICacheLoader<K, V>, IExpiration<K, V>, IMaxCapacity<K, V>, IBuild<K, V> {
+    public static final class Builder<K, V> implements CacheLoaderListener<K, V>,
+            CacheStatisticsResetExpiration<K, V>, Expiration<K, V>, MaxCapacity<K, V>, Build<K, V> {
         private long expiration;
         private int maxCapacity;
         private CacheLoader<K, V> cacheLoader;
+        private RemovalListener<K> removalListener;
+        private boolean periodicCacheStatsResetEnabled = false;
+        private long periodicCacheStatsResetExpiration;
 
         private Builder() {
         }
 
         @Override
-        public IBuild<K, V> withCacheLoader(CacheLoader<K, V> loader) {
+        public Build<K, V> withCacheLoader(CacheLoader<K, V> loader) {
             cacheLoader = loader;
             return this;
         }
 
         @Override
-        public ICacheLoader<K, V> withExpiration(Long milliseconds) {
+        public CacheLoaderListener<K, V> withExpiration(Long milliseconds) {
 
             if (milliseconds == null) {
                 expiration = Long.MAX_VALUE;
@@ -179,7 +237,7 @@ public class LoadingCache<K, V> {
         }
 
         @Override
-        public IExpiration<K, V> withMaxCapacity(Integer maxCapacity) {
+        public Expiration<K, V> withMaxCapacity(Integer maxCapacity) {
             if (maxCapacity == null) {
                 this.maxCapacity = 20;
             } else {
@@ -191,14 +249,37 @@ public class LoadingCache<K, V> {
         public LoadingCache<K, V> build() {
             return new LoadingCache<>(this);
         }
+
+        @Override
+        public Build<K, V> withRemovalListener(RemovalListener<K> removalListener) {
+            this.removalListener = removalListener;
+            return this;
+        }
+
+        @Override
+        public Build<K, V> withPeriodicCacheStatsResetExpiration(Long milliseconds) {
+            if (milliseconds != null) {
+                this.periodicCacheStatsResetExpiration = milliseconds;
+            } else {
+                this.periodicCacheStatsResetExpiration = Long.MAX_VALUE;
+            }
+            return this;
+        }
+
+
+        @Override
+        public CacheStatisticsResetExpiration<K, V> withPeriodicCacheStatsResetEnabled() {
+            this.periodicCacheStatsResetEnabled = true;
+            return this;
+        }
     }
 
-    static public class DoublyLinkedList<K, V> {
-        public Node<K, V> head;
-        public Node<K, V> tail;
+    private static class DoublyLinkedList<K, V> {
+        private Node<K, V> head;
+        private Node<K, V> tail;
         private int size;
 
-        public DoublyLinkedList() {
+        private DoublyLinkedList() {
             size = 0;
             this.head = null;
             this.tail = null;
@@ -212,13 +293,7 @@ public class LoadingCache<K, V> {
             return head;
         }
 
-        /**
-         * Inserting new node at the end of the linked list
-         * If there is node node present we will make the first node as out main node
-         *
-         * @param node - represent the DListNode value to be added to the linked list
-         */
-        public void addNode(Node<K, V> node) {
+        public void addTail(Node<K, V> node) {
             if (this.head == null) {
                 this.head = node;
                 this.tail = node;
@@ -235,10 +310,7 @@ public class LoadingCache<K, V> {
         }
 
 
-        /**
-         * Deleting the first Node from the list
-         */
-        public void deleteFirstNode() {
+        public void removeHead() {
             if (head != null) {
                 this.head = this.head.next;
                 if (head != null) this.head.prev = null;
@@ -246,10 +318,7 @@ public class LoadingCache<K, V> {
             }
         }
 
-        /**
-         * Deleting the last DListNode from the list
-         */
-        public void deleteLastNode() {
+        public void removeTail() {
             if (tail != null) {
                 this.tail = this.tail.prev;
                 if (tail != null) this.tail.next = null;
@@ -257,7 +326,7 @@ public class LoadingCache<K, V> {
             }
         }
 
-        public void delete(Node<K, V> node) {
+        public void unlink(Node<K, V> node) {
             if (node == null) {
                 return;
             }
@@ -273,58 +342,195 @@ public class LoadingCache<K, V> {
             } else {
                 tail = node.prev;
             }
+            node.next = null;
+            node.prev = null;
+            node = null;
+            size--;
 
         }
 
 
-        /**
-         * Get linked list size
-         *
-         * @return
-         */
         public int getSize() {
             return size;
         }
     }
 
-    static public class Node<K, V> {
-        // The actual data
+    private static class Node<K, V> {
         V value;
         K key;
         long lastAccessTime;
-        // Reference to the next node
         Node<K, V> next;
-        // Reference to the prev node
         Node<K, V> prev;
 
-        /**
-         * Constructor.
-         * Note that the next and prev variables are set to null, thus this is the "root-node"
-         *
-         * @param value node data
-         */
-        Node(K key, V value) {
-            this(null, key, value, null, System.currentTimeMillis());
-        }
-
-        /**
-         * Constructor.
-         *
-         * @param value node data
-         * @param next  reference to next node
-         * @param prev  reference to the previous node
-         */
-        Node(Node<K, V> prev, K key, V value, Node<K, V> next, long lastAccessTime) {
+        private Node(K key, V value) {
             this.value = value;
             this.key = key;
-            this.next = next;
-            this.prev = prev;
-            this.lastAccessTime = lastAccessTime;
+            touch();
+
+        }
+
+        public K getKey() {
+            return key;
+        }
+
+        public long getLastAccessTime() {
+            return lastAccessTime;
+        }
+
+        public Node<K, V> getNext() {
+            return next;
+        }
+
+        public Node<K, V> getPrev() {
+            return prev;
+        }
+
+        public V getValue() {
+            return value;
+        }
+
+        public void touch() {
+            this.lastAccessTime = System.currentTimeMillis();
         }
 
         @Override
         public String toString() {
             return String.valueOf(this.value);
+        }
+    }
+
+    public static class CacheStatistics {
+        private long hitCount = 0L;
+        private long missCount = 0L;
+        private long loadCount = 0L;
+        private long loadExceptionCount = 0L;
+        private long loadSuccessCount = 0L;
+        private long loadFailedCount = 0L;
+        private long expireCount = 0L;
+        private long evictionCount = 0L;
+        private long requestCount = 0L;
+
+
+        public void increaseHitCount() {
+            hitCount++;
+        }
+
+        public void increaseMissCount() {
+            missCount++;
+        }
+
+        public void increaseLoadCount() {
+            loadCount++;
+        }
+
+        public void increaseLoadExceptionCount() {
+            loadExceptionCount++;
+        }
+
+        public void increaseLoadFailedCount() {
+            loadFailedCount++;
+        }
+
+        public long getLoadFailedCount() {
+            return loadFailedCount;
+        }
+
+        public void increaseLoadSuccessCount() {
+            loadSuccessCount++;
+        }
+
+        public void increaseEvictionCount() {
+            evictionCount++;
+        }
+
+        public void increaseRequestCount() {
+            requestCount++;
+        }
+
+        public void increaseExpireCount() {
+            expireCount++;
+        }
+
+        public long getHitCount() {
+            return hitCount;
+        }
+
+        public long getMissCount() {
+            return missCount;
+        }
+
+        public long getExpireCount() {
+            return expireCount;
+        }
+
+        public double getHitRate() {
+            double hitRate = 0.0;
+            try {
+                hitRate = (double) hitCount / (getRequestCount());
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            return hitRate;
+        }
+
+        public double getMissRate() {
+            double missRate = 0.0;
+            try {
+                missRate = (double) missCount / (getRequestCount());
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            return missRate;
+        }
+
+        public long getLoadCount() {
+            return loadCount;
+        }
+
+        public long getLoadExceptionCount() {
+            return loadExceptionCount;
+        }
+
+        public long getLoadSuccessCount() {
+            return loadSuccessCount;
+        }
+
+        public long getEvictionCount() {
+            return evictionCount;
+        }
+
+        public long getRequestCount() {
+            return requestCount;
+        }
+
+        public void resetStatistics() {
+            logger.info("Resetting cache statistics");
+            hitCount = 0L;
+            missCount = 0L;
+            loadCount = 0L;
+            loadExceptionCount = 0L;
+            loadSuccessCount = 0L;
+            loadFailedCount = 0L;
+            expireCount = 0L;
+            evictionCount = 0L;
+            requestCount = 0L;
+        }
+
+        @Override
+        public String toString() {
+            return "CacheStatistics{" +
+                    "hitCount=" + hitCount +
+                    ", hitRate=" + String.format("%.2f", getHitRate()) +
+                    ", missCount=" + missCount +
+                    ", missRate=" + String.format("%.2f", getMissRate()) +
+                    ", loadCount=" + loadCount +
+                    ", loadExceptionCount=" + loadExceptionCount +
+                    ", loadSuccessCount=" + loadSuccessCount +
+                    ", loadFailedCount=" + loadFailedCount +
+                    ", expireCount=" + expireCount +
+                    ", evictionCount=" + evictionCount +
+                    ", requestCount=" + requestCount +
+                    '}';
         }
     }
 }
