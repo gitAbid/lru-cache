@@ -44,7 +44,7 @@ public class LoadingCache<K, V> {
                 logger.debug("Adding new entry [" + key + "->" + value + "]");
                 Node<K, V> node = new Node<>(key, value);
                 map.put(key, node);
-                doublyLinkedList.addNode(node);
+                doublyLinkedList.addNode(node.key, node.value);
                 if (map.size() > maxCapacity) {
                     logger.info("Maximum capacity reached removing cache [" + doublyLinkedList.getHead().key + "]");
                     evictNode(doublyLinkedList.getHead());
@@ -67,9 +67,9 @@ public class LoadingCache<K, V> {
         if (node == null) {
             return;
         }
-        doublyLinkedList.delete(node);
+        doublyLinkedList.delete(node.key);
         node.lastAccessTime = System.currentTimeMillis();
-        doublyLinkedList.addNode( node);
+        doublyLinkedList.addNode(node.key, node.value);
     }
 
     public V get(K key) {
@@ -124,7 +124,7 @@ public class LoadingCache<K, V> {
     }
 
     public void evictNode(Node<K, V> node) {
-        doublyLinkedList.delete(node);
+        doublyLinkedList.delete(node.key);
         map.remove(node.key);
     }
 
@@ -190,141 +190,6 @@ public class LoadingCache<K, V> {
 
         public LoadingCache<K, V> build() {
             return new LoadingCache<>(this);
-        }
-    }
-
-    static public class DoublyLinkedList<K, V> {
-        public Node<K, V> head;
-        public Node<K, V> tail;
-        private int size;
-
-        public DoublyLinkedList() {
-            size = 0;
-            this.head = null;
-            this.tail = null;
-        }
-
-        public Node<K, V> getTail() {
-            return tail;
-        }
-
-        public Node<K, V> getHead() {
-            return head;
-        }
-
-        /**
-         * Inserting new node at the end of the linked list
-         * If there is node node present we will make the first node as out main node
-         *
-         * @param node - represent the DListNode value to be added to the linked list
-         */
-        public void addNode(Node<K, V> node) {
-            if (this.head == null) {
-                this.head = node;
-                this.tail = node;
-                this.tail.next = null;
-                this.tail.prev = null;
-                this.size = 1;
-            } else {
-                Node<K, V> prev = this.tail;
-                this.tail.next = node;
-                this.tail = node;
-                this.tail.prev = prev;
-                this.size++;
-            }
-        }
-
-
-        /**
-         * Deleting the first Node from the list
-         */
-        public void deleteFirstNode() {
-            if (head != null) {
-                this.head = this.head.next;
-                if (head != null) this.head.prev = null;
-                this.size--;
-            }
-        }
-
-        /**
-         * Deleting the last DListNode from the list
-         */
-        public void deleteLastNode() {
-            if (tail != null) {
-                this.tail = this.tail.prev;
-                if (tail != null) this.tail.next = null;
-                this.size--;
-            }
-        }
-
-        public void delete(Node<K, V> node) {
-            if (node == null) {
-                return;
-            }
-
-            if (node.prev != null) {
-                node.prev.next = node.next;
-            } else {
-                head = node.next;
-            }
-
-            if (node.next != null) {
-                node.next.prev = node.prev;
-            } else {
-                tail = node.prev;
-            }
-
-        }
-
-
-        /**
-         * Get linked list size
-         *
-         * @return
-         */
-        public int getSize() {
-            return size;
-        }
-    }
-
-    static public class Node<K, V> {
-        // The actual data
-        V value;
-        K key;
-        long lastAccessTime;
-        // Reference to the next node
-        Node<K, V> next;
-        // Reference to the prev node
-        Node<K, V> prev;
-
-        /**
-         * Constructor.
-         * Note that the next and prev variables are set to null, thus this is the "root-node"
-         *
-         * @param value node data
-         */
-        Node(K key, V value) {
-            this(null, key, value, null, System.currentTimeMillis());
-        }
-
-        /**
-         * Constructor.
-         *
-         * @param value node data
-         * @param next  reference to next node
-         * @param prev  reference to the previous node
-         */
-        Node(Node<K, V> prev, K key, V value, Node<K, V> next, long lastAccessTime) {
-            this.value = value;
-            this.key = key;
-            this.next = next;
-            this.prev = prev;
-            this.lastAccessTime = lastAccessTime;
-        }
-
-        @Override
-        public String toString() {
-            return String.valueOf(this.value);
         }
     }
 }
